@@ -39,14 +39,48 @@ window.lincirMail = function(lead){
   try { var a = document.createElement('a'); a.href = url; a.style.display = 'none'; document.body.appendChild(a); a.click(); a.remove(); }
   catch(_) { try { location.href = url; } catch(__){} }
 };
+/* ── ENVÍO A info@lincir.com ──────────────────────────────────────────
+   Cada contacto (chat o formulario) se envía por FormSubmit a LINCIR_EMAIL,
+   con el teléfono/WhatsApp o el email que haya dado la persona.
+   IMPORTANTE: el PRIMER envío hace que FormSubmit mande un correo de
+   activación a info@lincir.com; hay que pulsar "Activate" una vez.
+   Si en el futuro se usa n8n, basta con rellenar LINCIR_WEBHOOK.
+   Si el envío falla, se abre el correo del visitante como respaldo. */
+window.LINCIR_EMAIL = 'info@lincir.com';
 window.lincirSend = function(lead){
   var data = {}, k;
   for (k in (lead || {})) data[k] = lead[k];
   data.origen = location.href; data.fecha = new Date().toISOString();
   var u = window.LINCIR_WEBHOOK;
-  if (!u || !window.fetch) { window.lincirMail(data); return Promise.resolve(false); }
-  return fetch(u, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(data), keepalive: true })
-    .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return true; })
+  if (!window.fetch) { window.lincirMail(data); return Promise.resolve(false); }
+  if (u) {
+    return fetch(u, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(data), keepalive: true })
+      .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return true; })
+      .catch(function(){ window.lincirMail(data); return false; });
+  }
+  var email = data.canal === 'email', T = { horasAnio:'h/año', eurosAnio:'€/año' };
+  function txt(v){ if (v == null || v === '') return '—'; if (Array.isArray(v)) return v.length ? v.join(', ') : '—';
+    if (typeof v === 'object') return Object.keys(v).map(function(s){ return v[s] + ' ' + (T[s] || s); }).join(' · '); return String(v); }
+  var body = {
+    _subject: 'Nuevo contacto web · ' + (data.nombre || 'sin nombre') + (email ? ' (email)' : ' (WhatsApp/teléfono)'),
+    _template: 'table',
+    _captcha: 'false',
+    'Nombre': txt(data.nombre),
+    'Empresa': txt(data.empresa),
+    'Cómo quiere que le contactemos': email ? 'Email' : 'WhatsApp / teléfono',
+    'Teléfono / WhatsApp': email ? '—' : txt(data.contacto),
+    'Email': email ? txt(data.contacto) : '—',
+    'Qué le frena': txt(data.frenos),
+    'Mensaje': txt(data.mensaje),
+    'Tiempo estimado': txt(data.tiempo),
+    'Página': data.origen,
+    'Fecha': new Date(data.fecha).toLocaleString('es-ES', { timeZone:'Europe/Madrid' })
+  };
+  if (email && data.contacto) body._replyto = data.contacto;
+  return fetch('https://formsubmit.co/ajax/' + window.LINCIR_EMAIL, {
+      method:'POST', headers:{ 'Content-Type':'application/json', 'Accept':'application/json' }, body: JSON.stringify(body) })
+    .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(j){ if (j && (j.success === false || j.success === 'false')) throw new Error(j.message || 'FormSubmit'); return true; })
     .catch(function(){ window.lincirMail(data); return false; });
 };
 </script>
