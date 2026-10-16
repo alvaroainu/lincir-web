@@ -23,31 +23,51 @@ window.addEventListener('error', function(e){
   if (e && e.message && /ResizeObserver loop/i.test(e.message)) { e.stopImmediatePropagation(); e.preventDefault(); }
 }, true);
 /* Envío de contactos (formulario y chat) */
-window.LINCIR_WEBHOOK = ''; // ← URL del webhook de n8n
-window.lincirMail = function(lead){
-  var L = { nombre:'Nombre', empresa:'Empresa', canal:'Canal', contacto:'Contacto', frenos:'Qué le frena', mensaje:'Mensaje', tiempo:'Tiempo', origen:'Origen', fecha:'Fecha' };
-  var T = { horasAnio:'h/año', eurosAnio:'€/año' }, lines = [];
-  Object.keys(lead || {}).forEach(function(k){
-    var v = lead[k];
-    if (v == null || v === '' || (Array.isArray(v) && !v.length)) return;
-    if (Array.isArray(v)) v = v.join(', ');
-    else if (typeof v === 'object') v = Object.keys(v).map(function(s){ return v[s] + ' ' + (T[s] || s); }).join(' · ');
-    lines.push((L[k] || k) + ': ' + v);
-  });
-  var url = 'mailto:info@lincir.com?subject=' + encodeURIComponent('Nuevo contacto web · ' + ((lead && lead.nombre) || '')) +
-            '&body=' + encodeURIComponent(lines.join('\n'));
-  try { var a = document.createElement('a'); a.href = url; a.style.display = 'none'; document.body.appendChild(a); a.click(); a.remove(); }
-  catch(_) { try { location.href = url; } catch(__){} }
-};
+/* ── ENVÍO DE CONTACTOS A info@lincir.com ─────────────────────────────
+   Cada contacto (chat o formulario) se envía directamente a LINCIR_EMAIL
+   mediante FormSubmit, con el teléfono/WhatsApp o el email que dé la persona.
+   No se abre nunca el correo del visitante.
+   IMPORTANTE: el PRIMER envío hace que FormSubmit mande un correo de
+   activación a info@lincir.com; hay que pulsar "Activate" una vez.
+   Si en el futuro se usa n8n, basta con rellenar LINCIR_WEBHOOK. */
+window.LINCIR_WEBHOOK = ''; // ← URL del webhook de n8n (opcional, futuro)
+window.LINCIR_EMAIL = 'info@lincir.com';
 window.lincirSend = function(lead){
   var data = {}, k;
   for (k in (lead || {})) data[k] = lead[k];
   data.origen = location.href; data.fecha = new Date().toISOString();
+  if (!window.fetch) return Promise.resolve(false);
+  function log(e){ try { console.error('Lincir: no se pudo enviar el contacto', e); } catch(_){} return false; }
   var u = window.LINCIR_WEBHOOK;
-  if (!u || !window.fetch) { window.lincirMail(data); return Promise.resolve(false); }
-  return fetch(u, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(data), keepalive: true })
-    .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return true; })
-    .catch(function(){ window.lincirMail(data); return false; });
+  if (u) {
+    return fetch(u, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(data), keepalive: true })
+      .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return true; })
+      .catch(log);
+  }
+  var email = data.canal === 'email', T = { horasAnio:'h/año', eurosAnio:'€/año' };
+  function txt(v){ if (v == null || v === '') return '—'; if (Array.isArray(v)) return v.length ? v.join(', ') : '—';
+    if (typeof v === 'object') return Object.keys(v).map(function(s){ return v[s] + ' ' + (T[s] || s); }).join(' · '); return String(v); }
+  var body = {
+    _subject: 'Nuevo contacto web · ' + (data.nombre || 'sin nombre') + (email ? ' (email)' : ' (WhatsApp/teléfono)'),
+    _template: 'table',
+    _captcha: 'false',
+    'Nombre': txt(data.nombre),
+    'Empresa': txt(data.empresa),
+    'Cómo quiere que le contactemos': email ? 'Email' : 'WhatsApp / teléfono',
+    'Teléfono / WhatsApp': email ? '—' : txt(data.contacto),
+    'Email': email ? txt(data.contacto) : '—',
+    'Qué le frena': txt(data.frenos),
+    'Mensaje': txt(data.mensaje),
+    'Tiempo estimado': txt(data.tiempo),
+    'Página': data.origen,
+    'Fecha': new Date(data.fecha).toLocaleString('es-ES', { timeZone:'Europe/Madrid' })
+  };
+  if (email && data.contacto) body._replyto = data.contacto;
+  return fetch('https://formsubmit.co/ajax/' + window.LINCIR_EMAIL, {
+      method:'POST', headers:{ 'Content-Type':'application/json', 'Accept':'application/json' }, body: JSON.stringify(body), keepalive: true })
+    .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ if (!r.ok) throw new Error(j.message || ('HTTP ' + r.status)); return j; }); })
+    .then(function(j){ if (j && (j.success === false || j.success === 'false')) throw new Error(j.message || 'FormSubmit'); return true; })
+    .catch(log);
 };
 </script>
 
@@ -2039,7 +2059,7 @@ html.zm canvas,html.zm .fx-blob,html.zm .orb,html.zm .hgrid,html.zm .fx-grid,htm
 <section class="section contact" id="contacto"><div class="wrap contact-grid"><div data-reveal=""><div class="kicker">Hablemos</div><h2>Cuéntanos qué te está frenando</h2><p>Una tarea que se repite, un proceso que consume demasiado tiempo, sistemas que dependen demasiado de ti…<span class="emph">Escríbenos y veamos juntos cómo hacerlo de otra manera.</span></p>
 <div class="ks ks-wait" id="ksph" aria-hidden="true"><div class="ks-hd"><span class="nx-live"><i></i>Tu caso, en directo</span></div><div class="ks-stage"><span class="ks-halo"></span><span class="ks-ring"></span><span class="ks-ring r2"></span><div class="ks-orb"></div><div class="ks-core"><i class="ti ti-check ks-tick"></i><span class="ks-tickw">Enviado</span><b class="ks-ct">Tu caso</b><small class="ks-cs">Responde en el chat</small><span class="ks-cc"></span></div><span class="ks-badge"></span></div><div class="ks-info"><span class="nx-live"><i></i>Tu caso, en directo</span><b class="ks-ib">Tu caso</b><span class="ks-is">Responde en el chat y se va formando aquí.</span></div></div>
 </div>
-<!-- Envío: window.lincirSend (webhook de n8n en window.LINCIR_WEBHOOK; si no hay, correo a info@lincir.com). -->
+<!-- Envío: window.lincirSend → info@lincir.com vía FormSubmit (o webhook de n8n si se rellena LINCIR_WEBHOOK). -->
 <form class="cform" id="cform" data-reveal="" novalidate="">
 <div class="cf-top"><span id="cfStep">1 / 3</span><span class="cf-bar"><i id="cfBar"></i></span></div>
 <div class="cf-pane on"><h3>¿Qué te frena?</h3><p class="cf-sub">Marca lo que te suene. Puedes elegir varias.</p><div class="chips" id="cfChips"></div><label for="c4">Cuéntanos más <span class="opt">(opcional)</span></label><textarea id="c4" name="mensaje" rows="3"></textarea></div>
